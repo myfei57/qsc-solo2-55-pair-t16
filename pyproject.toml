@@ -1,0 +1,29 @@
+[project]
+name = "csp-field-control"
+version = "1.0.0"
+description = "sequence and interlock utility"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.setuptools]
+packages = [
+    "cspplant",
+    "cspplant.ns",
+    "cspplant.store",
+    "cspplant.audit",
+    "cspplant.heliostat",
+    "cspplant.field",
+    "cspplant.receiver",
+    "cspplant.salt",
+    "cspplant.steam",
+    "cspplant.temp",
+    "cspplant.wash",
+    "cspplant.alarm",
+    "cspplant.sequence",
+    "cspplant.console",
+]
