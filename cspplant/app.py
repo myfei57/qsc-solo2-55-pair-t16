@@ -40,6 +40,7 @@ from .receiver.sensor import TemperatureSensor
 from .receiver.thermal import ThermalModel
 from .receiver.threshold import ThresholdModel
 from .receiver.valve import InletValve
+from .recovery.service import RecoveryService
 from .salt.loop import SaltLoop
 from .salt.persist import SaltPersistence
 from .sequence import (
@@ -48,7 +49,6 @@ from .sequence import (
     emergency_trip,
     reset_after_trip,
     shutdown_plant,
-    startup_plant,
     wash_mirrors,
 )
 from .steam.bypass import BypassValve
@@ -179,6 +179,20 @@ class Platform:
         self.truck = WashTruck(self.config.wash)
         self.drain = DrainSystem(self.config.wash)
         self.wash_cycle = WashCycle()
+
+        self.recovery = RecoveryService(
+            self.config,
+            self.clock,
+            self.bus,
+            store,
+            field=self.field,
+            salt=self.salt,
+            receiver=self.receiver,
+            steam=self.steam,
+            sun_at=self.sun_at,
+            latched=self.latch.latched,
+            next_run_id=self.ids.next,
+        )
 
         self._cycles = 0
         self._operations = 0
@@ -345,25 +359,36 @@ class Platform:
     def start_plant(
         self, dni_w_m2: float, load_mw: float, minute_of_day: float | None = None
     ) -> dict:
-        """按控制链顺序把平台从冷态带到带负荷。"""
+        """按控制链顺序把平台从冷态带到带负荷，逐步落检查点。
+
+        存在未完成的启动运行（掉电或进程重启留下的）时拒绝开新运行，
+        必须先 :meth:`recover` 续做或回退。
+        """
 
         with self._lock:
-            op_id = self.ids.next()
-            sun = self.sun_at(minute_of_day)
-            report = startup_plant(
-                self.field,
-                self.salt,
-                self.receiver,
-                self.steam,
-                sun,
-                dni_w_m2,
-                self.clock.now(),
-                load_mw,
-            )
-            summary = self._record_operation(op_id, "startup", report)
+            report = self.recovery.start_run(dni_w_m2, load_mw, minute_of_day)
             self._operations += 1
             self._persist()
-            return {**report, **summary}
+            return {**report, "op_id": report["run_id"], "operation": "startup"}
+
+    def recover(self, overrides: dict | None = None) -> dict:
+        """恢复未完成的启动：重做迁移核对参数，再按阶段续做或回退。
+
+        ``overrides`` 可带 ``dni_w_m2`` / ``load_mw`` / ``minute_of_day``；
+        恢复过程逐步落检查点并写审计，重复调用是幂等的。
+        """
+
+        with self._lock:
+            report = self.recovery.recover(overrides)
+            if report.get("recovered"):
+                self._operations += 1
+                self._persist()
+            return report
+
+    def recovery_status(self) -> dict:
+        """返回启动运行的检查点与恢复计划预览，供控制台展示。"""
+
+        return self.recovery.status()
 
     def sun_at(self, minute_of_day: float | None = None) -> SunPosition:
         """返回给定时刻的太阳位置；默认按当前挂钟时间推算。"""
@@ -770,6 +795,7 @@ class Platform:
                 "rules": self.rules.names(),
             },
             "levels": self.alert_levels(),
+            "recovery": self.recovery.summary(),
             "store": self.metrics.summary(),
             "audit": self.audit.summary(),
             "ids_issued": self.ids.issued(),

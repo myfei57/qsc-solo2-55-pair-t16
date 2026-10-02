@@ -1,12 +1,13 @@
 """命令行入口。
 
-五个子命令覆盖日常使用：
+六个子命令覆盖日常使用：
 
 ``serve``   启动控制台 HTTP 服务，可选地在启动后探测接口；
 ``demo``    在本地跑一遍完整流程（落盘追日 → 熔盐循环 → 带负荷 → 控制周期 →
             并发探测 → 手动接管 → 清洗 → 冷热罐切换 → 停堆与复位），用于交付
             前的真实运行检查；
 ``status``  打印当前状态快照；
+``recover`` 查看启动运行的断点检查点，``--run`` 时执行恢复（续做或回退）；
 ``config``  打印生效配置；
 ``reset``   清掉落盘的平台计数。
 """
@@ -150,6 +151,22 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_recover(args: argparse.Namespace) -> int:
+    platform = _build(args)
+    if args.run:
+        overrides = {}
+        if args.dni is not None:
+            overrides["dni_w_m2"] = args.dni
+        if args.load_mw is not None:
+            overrides["load_mw"] = args.load_mw
+        if args.minute is not None:
+            overrides["minute_of_day"] = args.minute
+        _dump(platform.recover(overrides))
+        return 0
+    _dump(platform.recovery_status())
+    return 0
+
+
 def _cmd_config(args: argparse.Namespace) -> int:
     config_path = getattr(args, "config", None)
     config = load_config(config_path) if config_path else default_config()
@@ -195,6 +212,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = sub.add_parser("status", help="打印状态快照", parents=[common])
     status.set_defaults(func=_cmd_status)
+
+    recover = sub.add_parser("recover", help="查看或执行启动断点恢复", parents=[common])
+    recover.add_argument("--run", action="store_true", help="执行恢复（默认只查看检查点与计划）")
+    recover.add_argument("--dni", type=float, default=None, help="恢复时覆盖 DNI (W/m²)")
+    recover.add_argument("--load-mw", type=float, default=None, help="恢复时覆盖汽机负荷 (MW)")
+    recover.add_argument("--minute", type=float, default=None, help="恢复时覆盖当日分钟数")
+    recover.set_defaults(func=_cmd_recover)
 
     config = sub.add_parser("config", help="打印生效配置", parents=[common])
     config.set_defaults(func=_cmd_config)

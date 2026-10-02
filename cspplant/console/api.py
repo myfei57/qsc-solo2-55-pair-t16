@@ -55,7 +55,10 @@ class Api:
         add("GET", "/api/journal", self._journal)
         add("GET", "/api/store", self._store)
         add("GET", "/api/readiness", self._readiness)
+        add("GET", "/api/recovery", lambda params, body: self._platform.recovery_status())
         add("GET", "/api/window", lambda params, body: {"mirrors": self._platform.mirrors_in_window()})
+        add("POST", "/api/plant/start", self._plant_start)
+        add("POST", "/api/recovery/run", self._recover)
         add("POST", "/api/track", self._track)
         add("POST", "/api/circulate", self._circulate)
         add("POST", "/api/cycle", self._cycle)
@@ -212,6 +215,20 @@ class Api:
         return {"ready": all(checks.values()), "checks": checks, "info": info}
 
     # ---- 动作 ---------------------------------------------------------
+
+    def _plant_start(self, params: dict, body: dict) -> dict:
+        dni = _as_float(body, "dni_w_m2", self._platform.field.meter.current())
+        load = _as_float(body, "load_mw", self._platform.config.steam.load_max_mw)
+        minute = body.get("minute_of_day")
+        return self._platform.start_plant(dni, load, None if minute is None else float(minute))
+
+    def _recover(self, params: dict, body: dict) -> dict:
+        overrides = {
+            key: float(body[key])
+            for key in ("dni_w_m2", "load_mw", "minute_of_day")
+            if body.get(key) is not None
+        }
+        return self._platform.recover(overrides)
 
     def _track(self, params: dict, body: dict) -> dict:
         dni = _as_float(body, "dni_w_m2", self._platform.field.meter.current())

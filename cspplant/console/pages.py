@@ -1,8 +1,9 @@
 """控制台页面。
 
-四个页面各自只读一份状态：镜场页看辐照与对焦、吸热器页看温度带与降额、熔盐页
-看罐位与联锁门限、告警页看闩锁与升级等级。页面不做任何写操作，动作一律走
-``/api/...`` 接口，避免浏览器刷新就把现场设备带动一次。
+五个页面各自只读一份状态：镜场页看辐照与对焦、吸热器页看温度带与降额、熔盐页
+看罐位与联锁门限、告警页看闩锁与升级等级、恢复页看启动运行的检查点与恢复
+计划。页面不做任何写操作，动作一律走 ``/api/...`` 接口，避免浏览器刷新就把
+现场设备带动一次。
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from html import escape
 
 from ..app import Platform
 
-PAGE_PATHS: tuple[str, ...] = ("/", "/receiver", "/salt", "/alarms")
+PAGE_PATHS: tuple[str, ...] = ("/", "/receiver", "/salt", "/alarms", "/recovery")
 
 _STYLE = """
 body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; background: #0f1720; color: #e6edf3; }
@@ -46,6 +47,7 @@ def _shell(title: str, body: str) -> str:
             ("/receiver", "吸热器"),
             ("/salt", "熔盐"),
             ("/alarms", "告警"),
+            ("/recovery", "恢复"),
         )
     )
     return (
@@ -147,11 +149,67 @@ def _alarm_page(platform: Platform) -> str:
     return _shell("告警控制台", body)
 
 
+def _recovery_page(platform: Platform) -> str:
+    """恢复页：启动运行检查点、参数核对与恢复计划。"""
+
+    status = platform.recovery_status()
+    checkpoint = status["checkpoint"]
+    if checkpoint is None:
+        body = _table("启动运行", [("状态", "暂无启动运行记录")])
+    else:
+        body = _table(
+            "启动运行检查点",
+            [
+                ("运行标识", checkpoint["run_id"]),
+                ("运行状态", checkpoint["state"]),
+                ("参数指纹", checkpoint["fingerprint"][:12]),
+                ("需要恢复", "是" if status["interrupted"] else "否"),
+                ("创建 / 更新", f"{checkpoint['created_ts']} / {checkpoint['updated_ts']}"),
+            ],
+        )
+        phase_rows = [
+            (
+                phase["name"],
+                f"{phase['state']}（{sum(1 for step in phase['steps'] if step['state'] == 'done')}/{len(phase['steps'])} 步）",
+            )
+            for phase in checkpoint["phases"]
+        ]
+        body += _table("阶段进度", phase_rows)
+    plan = status["plan"]
+    if plan is not None:
+        body += _table(
+            "参数核对（迁移重做）",
+            [("参数一致", "是" if plan["consistent"] else "否")]
+            + [(item["key"], f"{item['was']} → {item['now']}") for item in plan["changed"]]
+            + [
+                (check["name"], "通过" if check["ok"] else "未通过")
+                for check in plan["checks"]
+            ],
+        )
+        body += _table(
+            "恢复判定（按阶段）",
+            [(item["phase"], f"{item['decision']}：{item['reason']}") for item in plan["decisions"]],
+        )
+    last = status["last_report"]
+    if last is not None:
+        body += _table(
+            "最近一次执行",
+            [
+                ("运行标识", last["run_id"]),
+                ("结果", f"{last['state']}（ok={last['ok']}）"),
+                ("停在哪", last["stage"]),
+                ("违约项", "、".join(last["violations"]) or "-"),
+            ],
+        )
+    return _shell("恢复控制台", body)
+
+
 _RENDERERS = {
     "/": _mirror_page,
     "/receiver": _receiver_page,
     "/salt": _salt_page,
     "/alarms": _alarm_page,
+    "/recovery": _recovery_page,
 }
 
 
