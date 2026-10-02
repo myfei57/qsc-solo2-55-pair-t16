@@ -55,6 +55,9 @@ class Api:
         add("GET", "/api/journal", self._journal)
         add("GET", "/api/store", self._store)
         add("GET", "/api/readiness", self._readiness)
+        add("GET", "/api/startup/recovery", lambda params, body: self._platform.startup_recovery_plan())
+        add("POST", "/api/startup/rollback", lambda params, body: self._platform.rollback_startup())
+        add("POST", "/api/plant/startup", self._start_plant)
         add("GET", "/api/window", lambda params, body: {"mirrors": self._platform.mirrors_in_window()})
         add("POST", "/api/track", self._track)
         add("POST", "/api/circulate", self._circulate)
@@ -212,6 +215,14 @@ class Api:
         return {"ready": all(checks.values()), "checks": checks, "info": info}
 
     # ---- 动作 ---------------------------------------------------------
+
+    def _start_plant(self, params: dict, body: dict) -> dict:
+        minute = body.get("minute_of_day")
+        return self._platform.start_plant(
+            _as_float(body, "dni_w_m2", 800.0),
+            _as_float(body, "load_mw", self._platform.config.steam.load_max_mw),
+            None if minute is None else float(minute),
+        )
 
     def _track(self, params: dict, body: dict) -> dict:
         dni = _as_float(body, "dni_w_m2", self._platform.field.meter.current())

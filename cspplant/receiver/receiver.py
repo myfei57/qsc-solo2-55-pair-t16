@@ -11,7 +11,7 @@ from ..config import ReceiverLimits
 from ..errors import InterlockError
 from .derate import DerateController
 from .flow import FlowGate, FlowStatus
-from .header import SaltHeader
+from .header import ADMITTED, SaltHeader
 from .sensor import TemperatureSensor
 from .snapshot import ReceiverSnapshot
 from .thermal import ThermalModel
@@ -118,6 +118,62 @@ class Receiver:
         self._valve.set_target(100.0)
         self._state = CIRCULATING
         return state
+
+    def restore_circulation(
+        self, flow_kg_s: float, pressure_mpa: float | None = None
+    ) -> None:
+        """按盘上状态重建已确认流量与通盐状态，不重复执行循环阶段。"""
+
+        self._gate.restore_confirmed(flow_kg_s)
+        self._header.restore(
+            ADMITTED,
+            flow_kg_s,
+            self._header.pressure_mpa() if pressure_mpa is None else pressure_mpa,
+        )
+        self._valve.restore_position(100.0)
+        self._state = CIRCULATING
+
+    def restore_power(self, flow_kg_s: float, temperature_c: float) -> None:
+        """按盘上状态重建受热阶段结果，不重复执行首次受热。"""
+
+        self.restore_circulation(flow_kg_s)
+        self._thermal.reset(temperature_c)
+        self._sensor.reset(temperature_c)
+        self._derate.evaluate(temperature_c)
+        self._state = DERATED if self._derate.active() else AT_POWER
+
+    def return_to_circulating(self) -> str:
+        """从受热阶段回退到已通盐但未受热的边界。"""
+
+        self._thermal.reset()
+        self._sensor.reset(self._limits.ambient_c)
+        self._derate.reset()
+        self._heat_steps = 0
+        self._state = CIRCULATING
+        return self._state
+
+    def return_to_cold(self, dt: float = 1.0) -> dict:
+        """按顺序退出受热与通盐，回到冷态。"""
+
+        self.return_to_circulating()
+        self._valve.set_target(0.0)
+        for _ in range(600):
+            self._valve.step(dt)
+            if self._valve.at_target():
+                break
+        self._header.close()
+        for _ in range(600):
+            pressure = self._header.depressurise(dt)
+            if pressure <= 0.0:
+                break
+        self._gate.reset_confirmation()
+        self._state = COLD
+        return {
+            "state": self._state,
+            "header": self._header.state(),
+            "valve_pct": round(self._valve.position_pct(), 3),
+            "pressure_mpa": round(self._header.pressure_mpa(), 3),
+        }
 
     def open_valve(self, pct: float) -> float:
         """调整进口阀开度。"""

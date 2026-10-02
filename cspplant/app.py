@@ -47,10 +47,9 @@ from .sequence import (
     circulate,
     emergency_trip,
     reset_after_trip,
-    shutdown_plant,
-    startup_plant,
     wash_mirrors,
 )
+from .sequence.recovery import StartupOrchestrator, StartupRecovery
 from .steam.bypass import BypassValve
 from .steam.pressure import SteamPressure
 from .steam.system import SteamSystem
@@ -161,6 +160,15 @@ class Platform:
         )
 
         self.sun_model = SunModel()
+        self.startup_recovery = StartupRecovery(store, self.config, self.clock.now)
+        self.startup_orchestrator = StartupOrchestrator(
+            self.startup_recovery,
+            self.field,
+            self.salt,
+            self.receiver,
+            self.steam,
+            self.sun_at,
+        )
         self.solar = ClearSkyProfile(peak_dni_w_m2=950.0)
         self.ambient = AmbientModel()
         self.temperature_profile = TemperatureProfile(
@@ -268,6 +276,9 @@ class Platform:
                 if not isinstance(value, (dict, list))
                 and key not in reserved
             }
+            if step.get("action") in ("parameter_check", "parameter_recheck"):
+                changed = step.get("detail", {}).get("changed_sections", [])
+                detail["changed_sections_csv"] = ",".join(str(item) for item in changed)
             self.bus.publish(
                 Event.of(
                     step["component"],
@@ -292,6 +303,15 @@ class Platform:
                     violation=violation,
                 )
             )
+        if not report.get("audit_summary", True):
+            return {
+                "op_id": op_id,
+                "operation": operation,
+                "asset": asset,
+                "ok": bool(report.get("ok")),
+                "violations": list(report.get("violations", [])),
+                "audited_summary": False,
+            }
         summary = {
             "op_id": op_id,
             "operation": operation,
@@ -330,13 +350,12 @@ class Platform:
             }
 
     def stop(self) -> dict:
-        """停运平台：汽机卸载并走旁路，然后收起镜场、停泵关母管。"""
+        """停运平台：按启动阶段逆序卸载、退受热、停循环、收起镜场。"""
 
         with self._lock:
             op_id = self.ids.next()
-            report = shutdown_plant(
-                self.field, self.salt, self.receiver, self.steam, self.clock.now()
-            )
+            recovery = self.startup_orchestrator.rollback_and_clear(self.clock.now())
+            report = {"ok": recovery["ok"], "steps": recovery["steps"], "violations": recovery["violations"]}
             summary = self._record_operation(op_id, "shutdown", report)
             self._operations += 1
             self._persist()
@@ -349,18 +368,26 @@ class Platform:
 
         with self._lock:
             op_id = self.ids.next()
-            sun = self.sun_at(minute_of_day)
-            report = startup_plant(
-                self.field,
-                self.salt,
-                self.receiver,
-                self.steam,
-                sun,
-                dni_w_m2,
-                self.clock.now(),
-                load_mw,
-            )
+            report = self.startup_orchestrator.start_or_resume(dni_w_m2, load_mw, minute_of_day)
             summary = self._record_operation(op_id, "startup", report)
+            self._operations += 1
+            self._persist()
+            return {**report, **summary}
+
+    def startup_recovery_plan(self) -> dict:
+        """返回启动断点、参数核对与按阶段恢复计划。"""
+
+        with self._lock:
+            return self.startup_recovery.plan()
+
+    def rollback_startup(self) -> dict:
+        """按当前启动断点的逆序回退，并清除断点。"""
+
+        with self._lock:
+            op_id = self.ids.next()
+            recovery = self.startup_orchestrator.rollback_and_clear(self.clock.now())
+            report = {"ok": recovery["ok"], "steps": recovery["steps"], "violations": recovery["violations"]}
+            summary = self._record_operation(op_id, "startup_recovery_rollback", report)
             self._operations += 1
             self._persist()
             return {**report, **summary}
@@ -772,6 +799,7 @@ class Platform:
             "levels": self.alert_levels(),
             "store": self.metrics.summary(),
             "audit": self.audit.summary(),
+            "startup_recovery": self.startup_recovery.plan(),
             "ids_issued": self.ids.issued(),
         }
 
@@ -813,9 +841,10 @@ class Platform:
     def reset_state(self) -> bool:
         """清掉落盘的平台计数（交付前重新标定用）。"""
 
-        if not self.store.exists("platform_state"):
-            return False
-        return self.store.remove("platform_state")
+        existed = self.store.exists("platform_state")
+        removed = self.store.remove("platform_state")
+        self.startup_recovery.clear()
+        return existed or removed
 
 
 def build_plant(

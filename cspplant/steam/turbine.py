@@ -74,6 +74,13 @@ class Turbine:
         self._main_stop_open = False
         return self._main_stop_open
 
+    def restore_load(self, load_mw: float, bypass_open: bool = False) -> None:
+        """按盘上阶段状态重建主汽门与负荷，不重复升负荷。"""
+
+        self._bypass.restore(bypass_open)
+        self._main_stop_open = True
+        self._ramp.restore(load_mw)
+
     def raise_load(self, mw: float, dt: float = 1.0) -> TurbineReport:
         """带负荷：先关旁路，再开主汽门，最后按斜率升负荷。"""
 

@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-from ..errors import PlantError
 from ..field.field import FieldController
 from ..heliostat.sun import SunPosition
 from ..receiver.receiver import Receiver
@@ -86,8 +85,10 @@ def shutdown_plant(
     steps.extend(shed.steps)
     violations.extend(shed.violations)
 
-    stowed = field.stow_all()
-    steps.append({"component": "field", "action": "stow_all", "detail": {"mirrors": stowed}})
+    receiver_to_circulation = receiver.return_to_circulating()
+    steps.append(
+        {"component": "receiver", "action": "return_to_circulating", "detail": {"state": receiver_to_circulation}}
+    )
 
     if salt.cold_pump.running():
         salt.stop_cold()
@@ -107,10 +108,9 @@ def shutdown_plant(
     if not (salt.cold_pump.idle() and salt.hot_pump.idle()):
         violations.append("pumps_not_idle")
 
-    try:
-        receiver.header.close()
-    except PlantError as error:  # pragma: no cover - 关阀失败属于硬件故障
-        violations.append(error.message)
-    steps.append({"component": "receiver", "action": "close_header", "detail": {"state": receiver.header.state()}})
+    receiver_cold = receiver.return_to_cold(dt)
+    steps.append({"component": "receiver", "action": "return_to_cold", "detail": receiver_cold})
+
+    stowed = field.stow_all()
 
     return {"ok": not violations, "steps": steps, "violations": violations}

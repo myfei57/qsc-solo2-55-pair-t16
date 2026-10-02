@@ -70,6 +70,11 @@ class FieldPersistence:
             "opened_at": float(raw.get("opened_at", 0.0)),
         }
 
+    def clear_irradiance(self) -> bool:
+        """删除辐照度快照，返回是否真的删掉了。"""
+
+        return self._store.remove(IRRADIANCE_DOC)
+
     def clear_window(self) -> bool:
         """删除窗口文档，返回是否真的删掉了。"""
 

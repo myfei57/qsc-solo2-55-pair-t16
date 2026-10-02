@@ -22,6 +22,14 @@ class LoadRamp:
     def limits(self) -> SteamLimits:
         return self._limits
 
+    def restore(self, load_mw: float) -> float:
+        """按盘上阶段状态重建负荷，不重复走升负荷斜率。"""
+
+        value = max(0.0, min(self._limits.load_max_mw, float(load_mw)))
+        self._target = value
+        self._current = value
+        return value
+
     def request(self, mw: float) -> float:
         """下达负荷目标（夹到 [0, load_max_mw]）。"""
 

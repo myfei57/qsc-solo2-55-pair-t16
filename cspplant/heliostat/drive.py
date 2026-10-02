@@ -111,6 +111,17 @@ class HeliostatDrive:
         self._aimed = False
         return target
 
+    def restore_position(self, target: AimAngles) -> AimAngles:
+        """按盘上目标重建到位状态；只对账，不向执行器重复下发。"""
+
+        self._manual = False
+        self._target = AimAngles(normalize_azimuth(target.azimuth_deg), float(target.elevation_deg))
+        self._azimuth = self._target.azimuth_deg
+        self._elevation = self._target.elevation_deg
+        self._state = IDLE
+        self._aimed = True
+        return self._target
+
     def step(self, dt: float) -> AimAngles:
         """按步长推进两个轴，返回推进后的实际角度。"""
 

@@ -47,6 +47,27 @@ class BypassValve:
         self._closes += 1
         return self._open
 
+    def restore(self, open_state: bool, now: float | None = None) -> bool:
+        """按盘上状态重建旁路阀状态，不重复发开关命令。"""
+
+        self._open = bool(open_state)
+        self._opened_at = None if not self._open or now is None else float(now)
+        return self._open
+
+    def ensure_open(self, now: float) -> bool:
+        """确保旁路打开；已打开时不重复发开阀命令。"""
+
+        if not self._open:
+            return self.open(now)
+        return True
+
+    def ensure_closed(self) -> bool:
+        """确保旁路关闭；已关闭时不重复发关阀命令。"""
+
+        if self._open:
+            return self.close()
+        return False
+
     def is_open(self) -> bool:
         """旁路是否打开。"""
 

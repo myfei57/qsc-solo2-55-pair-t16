@@ -61,6 +61,13 @@ class DerateController:
         ratio = (self._limits.temp_max_c - temp) / span
         return max(0.0, min(100.0, 100.0 * ratio))
 
+    def reset(self) -> None:
+        """清除降额状态；回退后不能沿用旧热态的降额假设。"""
+
+        self._active = False
+        self._last_temp = float(self._limits.temp_target_c)
+        self._min_ceiling = 100.0
+
     def evaluate(self, temperature_c: float) -> DerateState:
         """推进一次判定，返回降额状态。"""
 

@@ -29,6 +29,12 @@ class InletValve:
         self._target = max(0.0, min(100.0, float(pct)))
         return self._target
 
+    def restore_position(self, pct: float) -> float:
+        """按盘上阶段状态重建阀门开度，不重复驱动阀门。"""
+
+        self._position = self._target = max(0.0, min(100.0, float(pct)))
+        return self._position
+
     def step(self, dt: float) -> float:
         """按行程速度推进一个步长，返回推进后的开度。"""
 

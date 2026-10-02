@@ -60,6 +60,15 @@ class SaltHeader:
 
         return self._state
 
+    def restore(self, state: str, flow_kg_s: float = 0.0, pressure_mpa: float = 0.0) -> str:
+        """按盘上阶段状态重建母管状态，不重复发通盐或关阀命令。"""
+
+        self._state = ADMITTED if state == ADMITTED else CLOSED
+        self._flow = max(0.0, float(flow_kg_s))
+        self._pressure = max(0.0, float(pressure_mpa))
+        self._pumps = 1 if self._state == ADMITTED else 0
+        return self._state
+
     def admit(self, flow_confirmed: bool) -> str:
         """允许熔盐进入母管；流量未确认即拒绝。"""
 

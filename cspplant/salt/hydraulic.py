@@ -27,6 +27,12 @@ class HydraulicLoop:
     def limits(self) -> SaltLimits:
         return self._limits
 
+    def restore_flow(self, flow_kg_s: float) -> float:
+        """按盘上阶段状态重建净流量，不重复推进泵。"""
+
+        self._flow = max(0.0, float(flow_kg_s))
+        return self._flow
+
     def update(self, pumps: list[SaltPump], dt: float) -> float:
         """推进一个步长并汇总净流量。"""
 

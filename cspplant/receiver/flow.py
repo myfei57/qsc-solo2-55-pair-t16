@@ -47,6 +47,20 @@ class FlowGate:
     def limits(self) -> ReceiverLimits:
         return self._limits
 
+    def reset_confirmation(self) -> None:
+        """清除流量确认累计，回退后必须重新确认。"""
+
+        self._hold_s = 0.0
+        self._was_confirmed = False
+        self._last_flow = 0.0
+
+    def restore_confirmed(self, flow_kg_s: float) -> None:
+        """按盘上阶段状态重建已确认状态，不重复累计确认时间。"""
+
+        self._hold_s = self._limits.flow_confirm_s
+        self._was_confirmed = True
+        self._last_flow = max(0.0, float(flow_kg_s))
+
     def update(self, flow_kg_s: float, dt: float) -> FlowStatus:
         """推进一个步长并返回流量判定结果。"""
 

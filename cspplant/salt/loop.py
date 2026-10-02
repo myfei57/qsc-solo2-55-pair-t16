@@ -100,6 +100,29 @@ class SaltLoop:
     def threshold(self) -> ThresholdModel:
         return self._threshold
 
+    def restore_circulation(self, flow_kg_s: float | None = None) -> dict:
+        """重建已完成的熔盐循环，不重复发启泵命令。"""
+
+        with self._lock:
+            target = self._limits.flow_baseline_kg_s if flow_kg_s is None else float(flow_kg_s)
+            self._cold_pump.restore(True, target)
+            self._hot_pump.restore(False, 0.0)
+            self._hydraulic.restore_flow(target)
+            self._header.update(target, 1, 1.0)
+            return {"flow_kg_s": round(self.flow_kg_s(), 3), "pumps_running": self.pumps_running()}
+
+    def stop_cold_idempotent(self, dt: float = 1.0) -> dict:
+        """幂等停冷泵并等其停稳；已经停止时只确认状态。"""
+
+        with self._lock:
+            if self._cold_pump.running():
+                self._cold_pump.stop()
+            for _ in range(600):
+                self._hydraulic.update([self._cold_pump, self._hot_pump], dt)
+                if self._cold_pump.idle():
+                    break
+            return {"running": self._cold_pump.running(), "flow_kg_s": round(self.flow_kg_s(), 3)}
+
     def start_cold(self) -> float:
         """启冷泵。"""
 

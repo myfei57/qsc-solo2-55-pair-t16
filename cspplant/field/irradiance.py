@@ -129,6 +129,20 @@ class IrradianceMeter:
 
         return self._rejected
 
+    def restore_current(self, dni_w_m2: float, ts: float) -> None:
+        """按断点恢复已采集但尚未落盘的当前值，不把它当作一次新采集。"""
+
+        self._current = max(0.0, float(dni_w_m2))
+        self._sampled_at = float(ts)
+
+    def clear_durable(self) -> bool:
+        """清除已落盘快照与内存当前值（启动回退到冷态时使用）。"""
+
+        removed = self._persistence.clear_irradiance()
+        self._current = 0.0
+        self._sampled_at = 0.0
+        return removed
+
     def persist_count(self) -> int:
         """返回落盘次数。"""
 

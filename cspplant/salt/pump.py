@@ -49,6 +49,15 @@ class SaltPump:
         self._stops += 1
         return 0.0
 
+    def restore(self, running: bool, flow_kg_s: float | None = None) -> None:
+        """按盘上阶段状态重建泵状态，不重复发启停命令。"""
+
+        self._demand = bool(running)
+        if flow_kg_s is None:
+            self._flow = self._target if self._demand else 0.0
+        else:
+            self._flow = max(0.0, float(flow_kg_s))
+
     def step(self, dt: float) -> float:
         """按升速斜率推进一个步长，返回推进后的流量。"""
 

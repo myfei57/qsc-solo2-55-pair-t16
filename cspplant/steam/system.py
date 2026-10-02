@@ -110,6 +110,42 @@ class SteamSystem:
                 "exceedances": self._pressure.exceedances(),
             }
 
+    def restore_load(self, load_mw: float) -> dict:
+        """重建已完成的建负荷结果，不重复走建负荷阶段。"""
+
+        with self._lock:
+            self._turbine.restore_load(load_mw, bypass_open=False)
+            return {"load_mw": round(load_mw, 3), "main_stop_open": True, "bypass_open": False}
+
+    def rollback_load(self, now: float, dt: float = 1.0) -> dict:
+        """按建负荷的逆序卸载：先开旁路，再卸负荷，最后关主汽门与旁路。"""
+
+        with self._lock:
+            steps: list[dict] = []
+            violations: list[str] = []
+            bypass_was_open = self._bypass.is_open()
+            if not bypass_was_open:
+                self._bypass.ensure_open(now)
+            steps.append(
+                {"component": "steam", "action": "recovery_open_bypass", "detail": {"open": self._bypass.is_open()}}
+            )
+            self._ramp.request(0.0)
+            load = self._ramp.settle(dt, 3600)
+            steps.append({"component": "steam", "action": "recovery_lower_load", "detail": {"load_mw": round(load, 3)}})
+            if not self._ramp.at_target():
+                violations.append("load_not_reached")
+            if self._turbine.main_stop_open():
+                self._turbine.close_main_stop()
+            steps.append(
+                {"component": "steam", "action": "recovery_close_main_stop", "detail": {"open": self._turbine.main_stop_open()}}
+            )
+            if not bypass_was_open:
+                self._bypass.ensure_closed()
+            steps.append(
+                {"component": "steam", "action": "recovery_close_bypass", "detail": {"open": self._bypass.is_open()}}
+            )
+            return {"ok": not violations, "steps": steps, "violations": violations, "load_mw": round(load, 3)}
+
     def load(self, mw: float) -> TurbineReport:
         """建负荷。"""
 

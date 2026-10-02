@@ -59,20 +59,29 @@ def _shell(title: str, body: str) -> str:
 def _mirror_page(platform: Platform) -> str:
     """镜场页：辐照、策略、对焦与调度。"""
 
-    status = platform.status()["field"]
+    status = platform.status()
+    field_status = status["field"]
+    recovery = status.get("startup_recovery", {})
+    checkpoint = recovery.get("checkpoint") or {}
     rows = [
-        ("运行模式", status["mode"]),
-        ("判定依据", status["reason"]),
-        ("当前辐照 (W/m²)", status["dni_w_m2"]),
-        ("已落盘辐照 (W/m²)", status["durable_dni_w_m2"]),
-        ("采样 / 拒绝 / 落盘次数", f"{status['samples']} / {status['rejected']} / {status['persists']}"),
-        ("对焦镜数", f"{status['focusing']} / {status['mirrors']['count']}"),
-        ("避让镜数", status["excluded"]),
-        ("手动接管镜数", status["manual"]),
-        ("执行负荷 (%)", status["dispatch_pct"]),
-        ("调度目标 (%)", status["dispatch_target_pct"]),
-        ("避让区挡下次数", status["zone_vetoes"]),
-        ("清洗窗口数", status["windows"]),
+        ("运行模式", field_status["mode"]),
+        ("启动恢复判定口径", recovery.get("decision_unit", "-")),
+        ("启动恢复动作", recovery.get("action", "start")),
+        ("中断阶段", recovery.get("interrupted_stage") or "-"),
+        ("回退目标阶段", recovery.get("rollback_to_stage") or "-"),
+        ("参数已变化", "是" if not recovery.get("parameter_check", {}).get("ok", True) else "否"),
+        ("断点恢复次数", checkpoint.get("recovery_count", 0)),
+        ("判定依据", field_status["reason"]),
+        ("当前辐照 (W/m²)", field_status["dni_w_m2"]),
+        ("已落盘辐照 (W/m²)", field_status["durable_dni_w_m2"]),
+        ("采样 / 拒绝 / 落盘次数", f"{field_status['samples']} / {field_status['rejected']} / {field_status['persists']}"),
+        ("对焦镜数", f"{field_status['focusing']} / {field_status['mirrors']['count']}"),
+        ("避让镜数", field_status["excluded"]),
+        ("手动接管镜数", field_status["manual"]),
+        ("执行负荷 (%)", field_status["dispatch_pct"]),
+        ("调度目标 (%)", field_status["dispatch_target_pct"]),
+        ("避让区挡下次数", field_status["zone_vetoes"]),
+        ("清洗窗口数", field_status["windows"]),
         ("热功率 (kW)", round(platform.field.thermal_power_kw(), 1)),
     ]
     return _shell("镜场控制台", _table("镜场状态", rows))

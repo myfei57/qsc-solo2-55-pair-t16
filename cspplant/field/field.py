@@ -153,6 +153,36 @@ class FieldController:
             and not self._meter.stale(now)
         )
 
+    def restore_current_irradiance(self, dni_w_m2: float, ts: float) -> None:
+        """按断点恢复当前辐照采样，不重复执行采集。"""
+
+        self._meter.restore_current(dni_w_m2, ts)
+
+    def restore_tracking(self, sun: SunPosition, now: float) -> dict:
+        """按盘上快照重建追日姿态，不再重复采集或下发同一批目标。"""
+
+        with self._lock:
+            aimed = 0
+            for mirror in self._registry.all():
+                drive = self._drives[mirror.name]
+                if drive.excluded or drive.manual:
+                    continue
+                target = aim_angles_for(mirror.x_m, mirror.y_m, mirror.z_m, sun, self._aim_point)
+                drive.restore_position(target)
+                aimed += 1
+            return {
+                "aimed": aimed,
+                "skipped": len(self._drives) - aimed,
+                "dni_w_m2": round(self._meter.durable(), 2),
+                "restored_at": round(now, 3),
+            }
+
+    def clear_durable_irradiance(self) -> bool:
+        """清除辐照落盘快照，回退到冷态前必须作废旧假设。"""
+
+        with self._lock:
+            return self._meter.clear_durable()
+
     # ---- 策略与追日 ---------------------------------------------------
 
     def decide(self, sun: SunPosition, now: float, latched: bool = False) -> StrategyDecision:
@@ -254,6 +284,33 @@ class FieldController:
                 "violations": violations,
                 "aimed": aligned,
             }
+
+    def aim_targets(self, sun: SunPosition) -> dict:
+        """按当前太阳位置给可自动控制的镜子下发追日目标。"""
+
+        with self._lock:
+            durable = self._meter.durable()
+            if durable <= 0.0:
+                return {"ok": False, "aimed": 0, "skipped": 0, "violations": ["irradiance_not_durable"]}
+            aimed = 0
+            skipped = 0
+            for mirror in self._registry.all():
+                drive = self._drives[mirror.name]
+                if drive.excluded or drive.manual:
+                    skipped += 1
+                    continue
+                target = aim_angles_for(mirror.x_m, mirror.y_m, mirror.z_m, sun, self._aim_point)
+                drive.aim(target)
+                aimed += 1
+            return {"ok": True, "aimed": aimed, "skipped": skipped, "dni_w_m2": round(durable, 2)}
+
+    def settle_tracking(self, expected: int | None = None) -> dict:
+        """确认已经下发的追日目标全部到位，不重复下发目标。"""
+
+        with self._lock:
+            aimed = sum(1 for drive in self._drives.values() if drive.aimed_at_receiver) if expected is None else int(expected)
+            aligned = self._settle()
+            return {"aligned": aligned, "aimed": aimed}
 
     def _settle(self) -> int:
         """推进所有驱动直到到位或步数用尽，返回到位台数。"""
